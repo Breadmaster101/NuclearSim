@@ -1,0 +1,1067 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>W-PWR ADVANCED SIMULATOR | COLD START STABLE</title>
+    <link href="https://fonts.googleapis.com/css2?family=Roboto+Mono:wght@400;700&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --bg-dark: #0b0b0e;
+            --panel-bg: #18181b;
+            --panel-border: #3f3f46;
+            --text-main: #e4e4e7;
+            --text-dim: #71717a;
+            --led-red: #ef4444;
+            --led-green: #22c55e;
+            --led-amber: #f59e0b;
+            --led-blue: #3b82f6;
+            --lcd-bg: #0f150f;
+            --lcd-text: #4caf50;
+            --manual-bg: #27272a;
+        }
+
+        * { box-sizing: border-box; user-select: none; }
+        body {
+            margin: 0; padding: 0;
+            background: var(--bg-dark); color: var(--text-main);
+            font-family: 'Roboto Mono', monospace;
+            height: 100vh; display: flex; flex-direction: column;
+            overflow: hidden; font-size: 13px; 
+        }
+
+        strong.kw { color: var(--led-green); }
+        strong.warn { color: var(--led-red); }
+        strong.note { color: var(--led-blue); }
+
+        /* --- HEADER --- */
+        header {
+            background: #000; border-bottom: 1px solid #333;
+            padding: 0 20px; display: flex; justify-content: space-between; align-items: center;
+            height: 55px; flex-shrink: 0;
+        }
+        .sim-controls { display: flex; gap: 10px; }
+        .btn-std { 
+            background: #27272a; border: 1px solid #52525b; color: #a1a1aa; 
+            cursor: pointer; font-size: 12px; padding: 6px 12px; 
+            font-family: inherit; text-transform: uppercase; font-weight: bold;
+        }
+        .btn-std:hover { background: #3f3f46; color: #fff; }
+        .btn-std.active { background: var(--led-green); color: #000; border-color: #2f2; }
+        .btn-std.proc { border-color: var(--led-amber); color: var(--led-amber); }
+
+        /* --- ANNUNCIATOR --- */
+        #annunciator-panel {
+            display: grid; grid-template-columns: repeat(10, 1fr);
+            background: #000; padding: 6px; gap: 4px; height: 85px; flex-shrink: 0;
+            border-bottom: 2px solid #333;
+        }
+        .alarm-tile {
+            background: #18181b; display: flex; align-items: center; justify-content: center;
+            text-align: center; font-size: 10px; color: #444; border: 1px solid #27272a;
+            font-weight: bold; padding: 4px; line-height: 1.2; cursor: pointer;
+            box-shadow: inset 0 0 5px #000;
+        }
+        .alarm-tile.active-new { background: var(--led-red); color: #fff; animation: flash 0.5s infinite; border-color: #f00; }
+        .alarm-tile.active-ack { background: var(--led-red); color: #fff; opacity: 1; border-color: #800; }
+        .alarm-tile.cleared-new { background: #18181b; color: var(--led-red); animation: flash-slow 1s infinite; border-color: #500; }
+        .alarm-tile.first-out { background: #fff; color: #d00; border: 3px solid red; }
+        
+        @keyframes flash { 0% { opacity: 1; } 50% { opacity: 0.3; } 100% { opacity: 1; } }
+        @keyframes flash-slow { 0% { color: #333; } 50% { color: var(--led-red); } 100% { color: #333; } }
+
+        .alarm-controls {
+            position: absolute; top: 60px; right: 10px; display: flex; flex-direction: column; gap: 4px; z-index: 50;
+        }
+
+        /* --- WORKSPACE --- */
+        #workspace { display: flex; flex: 1; overflow: hidden; }
+        .section {
+            flex: 1; border-right: 1px solid #333; display: flex; flex-direction: column;
+            background: var(--panel-bg); position: relative;
+        }
+        .section-header {
+            background: #27272a; padding: 8px 12px; font-weight: bold; color: #d4d4d8;
+            border-bottom: 1px solid #3f3f46; border-top: 1px solid #3f3f46;
+            font-size: 12px; text-transform: uppercase; letter-spacing: 1px;
+            display: flex; justify-content: space-between;
+        }
+        .panel-content { padding: 12px; overflow-y: auto; flex: 1; display: flex; flex-direction: column; gap: 15px; }
+
+        /* --- COMPONENT STYLES --- */
+        .group-box { 
+            border: 1px solid #3f3f46; padding: 10px; position: relative; margin-top: 8px; 
+            background: #121214;
+        }
+        .group-label {
+            position: absolute; top: -9px; left: 10px; background: #121214;
+            padding: 0 6px; font-size: 11px; color: #a1a1aa; font-weight: bold;
+        }
+
+        /* METERS & DIGITAL */
+        .digital-readout {
+            background: var(--lcd-bg); color: var(--lcd-text);
+            font-family: 'Courier New', monospace; padding: 4px 6px;
+            border: 1px inset #333; text-align: right; font-weight: bold;
+            font-size: 16px; letter-spacing: 1px; min-width: 80px;
+            text-shadow: 0 0 3px var(--lcd-text);
+        }
+        .meter-row { display: flex; justify-content: space-between; align-items: center; margin-bottom: 5px; height: 26px;}
+        .meter-label { font-size: 12px; color: #d4d4d8; }
+
+        /* PID CONTROLLER FACEPLATE */
+        .pid-faceplate {
+            display: grid; grid-template-columns: 1fr 1fr; gap: 6px;
+            background: #1c1c1f; border: 1px solid #444; padding: 6px;
+        }
+        .pid-bar-container {
+            grid-column: span 2; display: flex; height: 14px; background: #000; border: 1px solid #333; position: relative;
+        }
+        .pid-sp-tri { /* Setpoint Triangle */
+            position: absolute; bottom: -6px; width: 0; height: 0; 
+            border-left: 5px solid transparent; border-right: 5px solid transparent; border-bottom: 6px solid var(--led-green);
+            transform: translateX(-50%); transition: left 0.2s; z-index: 5;
+        }
+        .pid-pv-bar { /* Process Variable */
+            height: 100%; background: var(--led-amber); transition: width 0.2s;
+        }
+        .pid-out-bar { /* Output */
+            height: 6px; background: var(--led-blue); margin-top: 2px; width: 0%; transition: width 0.2s;
+        }
+        .pid-mode-btn {
+            font-size: 11px; border: 1px solid #555; background: #222; color: #888; cursor: pointer; text-align: center; padding: 4px;
+        }
+        .pid-mode-btn.active { background: var(--led-amber); color: #000; font-weight: bold; }
+
+        /* BUTTONS */
+        .push-btn {
+            background: #27272a; border: 1px solid #52525b; color: #e4e4e7;
+            padding: 8px; width: 100%; cursor: pointer; font-weight: bold;
+            font-family: inherit; font-size: 12px;
+            box-shadow: 0 3px 0 #000; transform: translateY(0); transition: 0.1s;
+        }
+        .push-btn:active { transform: translateY(3px); box-shadow: none; }
+        .push-btn.red { border-color: #7f1d1d; background: #450a0a; color: #fecaca; }
+        .push-btn.red:active { background: #b91c1c; }
+        .push-btn.green { border-color: #1d7f1d; background: #0a450a; color: #cafeca; }
+        .push-btn.green:active { background: #1c451c; }
+        
+        /* VISUALS */
+        .bistable-light {
+            width: 100%; height: 18px; background: #222; border: 1px solid #444;
+            color: #444; font-size: 10px; text-align: center; line-height: 18px; margin-bottom: 2px;
+        }
+        .bistable-light.tripped { background: var(--led-red); color: #fff; font-weight: bold; box-shadow: 0 0 8px var(--led-red); }
+        .bar-graph-container { width: 100%; background: #000; border: 1px solid #444; margin-top: 2px; }
+        
+        input[type=range] { width: 70px; height: 10px; cursor: pointer; }
+
+        canvas { background: #000; border: 1px solid #333; width: 100%; }
+        
+        /* CUSTOM SCROLL */
+        ::-webkit-scrollbar { width: 8px; }
+        ::-webkit-scrollbar-track { background: #111; }
+        ::-webkit-scrollbar-thumb { background: #333; border-radius: 4px; }
+
+    </style>
+</head>
+<body>
+
+<div class="alarm-controls">
+    <button class="btn-std" onclick="alarmSystem.acknowledge()">ACK</button>
+    <button class="btn-std" onclick="alarmSystem.reset()">RESET</button>
+    <button class="btn-std" onclick="alarmSystem.test()">TEST</button>
+</div>
+
+<header>
+    <div style="color: var(--led-amber); font-weight: bold; font-size: 16px; letter-spacing: 1px;">
+        WESTINGHOUSE <span style="color:#fff">PWR</span> SIM
+    </div>
+    <div class="sim-controls">
+        <div class="btn-std active" id="x1" onclick="setSpeed(1)">REALTIME</div>
+        <div class="btn-std" id="x10" onclick="setSpeed(10)">x10</div>
+        <div class="btn-std" id="x50" onclick="setSpeed(50)">x50</div>
+        <div class="btn-std" onclick="toggleFreeze()" id="btn-freeze">FREEZE</div>
+    </div>
+    <div style="font-family: 'Courier New'; font-weight:bold; font-size: 16px;" id="clock">00:00:00</div>
+</header>
+
+<!-- FIRST OUT & ANNUNCIATOR -->
+<div id="annunciator-panel">
+    <!-- Row 1 -->
+    <div class="alarm-tile" id="al-trip" data-firstout="true">REACTOR<br>TRIP</div>
+    <div class="alarm-tile" id="al-si">SAFETY<br>INJECTION</div>
+    <div class="alarm-tile" id="al-turb-trip" data-firstout="true">TURBINE<br>TRIP</div>
+    <div class="alarm-tile" id="al-gen-trip">GEN<br>TRIP</div>
+    <div class="alarm-tile" id="al-otdt" data-firstout="true">OVERTEMP<br>DELTA-T</div>
+    <div class="alarm-tile" id="al-opdt" data-firstout="true">OVERPOWER<br>DELTA-T</div>
+    <div class="alarm-tile" id="al-press-lo" data-firstout="true">PZR PRESS<br>LO-2</div>
+    <div class="alarm-tile" id="al-press-hi">PZR PRESS<br>HI</div>
+    <div class="alarm-tile" id="al-sg-lo">SG LEVEL<br>LO-LO</div>
+    <div class="alarm-tile" id="al-bus-uv">4kV BUS<br>UV</div>
+
+    <!-- Row 2 -->
+    <div class="alarm-tile" id="al-rod-dev">ROD DEV<br>BANK D</div>
+    <div class="alarm-tile" id="al-flux-hi">NC FLUX<br>HIGH</div>
+    <div class="alarm-tile" id="al-tavg-dev">TAVG/TREF<br>DEVIATION</div>
+    <div class="alarm-tile" id="al-pzr-lvl">PZR LEVEL<br>DEV</div>
+    <div class="alarm-tile" id="al-sg-mis">SG STM/FW<br>MISMATCH</div>
+    <div class="alarm-tile" id="al-vac-lo">COND VAC<br>LOW</div>
+    <div class="alarm-tile" id="al-vib-hi">TURB VIB<br>HIGH</div>
+    <div class="alarm-tile" id="al-ecc-act">ECCS<br>ACTUATED</div>
+    <div class="alarm-tile" id="al-grid-freq">GRID FREQ<br>ABNORMAL</div>
+    <div class="alarm-tile" id="al-loss-dc">LOSS OF<br>DC POWER</div>
+</div>
+
+<div id="workspace">
+
+    <!-- REACTOR & RCS -->
+    <div class="section">
+        <div class="section-header">
+            <span>Primary Systems</span>
+            <span style="color: var(--led-green)">RCS</span>
+        </div>
+        <div class="panel-content">
+            
+            <!-- ROD CONTROL -->
+            <div class="group-box">
+                <div class="group-label">ROD CONTROL SYSTEM</div>
+                <div class="meter-row">
+                    <span class="meter-label">AUTO DEMAND</span>
+                    <div class="digital-readout" id="val-rod-speed">0 SPM</div>
+                </div>
+                <div class="bar-graph-container" style="height: 8px; background: #222; margin-bottom: 8px;">
+                    <div id="bar-rod-speed" style="width: 50%; height:100%; background: #444; margin:auto;"></div>
+                </div>
+
+                <div style="display:grid; grid-template-columns: 1fr 1fr; gap: 8px; font-size: 11px; text-align: center;">
+                    <div>BANK A: <span id="bank-a-steps" style="color: #aaa">228</span></div>
+                    <div>BANK B: <span id="bank-b-steps" style="color: #aaa">228</span></div>
+                    <div>BANK C: <span id="bank-c-steps" style="color: #aaa">228</span></div>
+                    <div>BANK D: <span id="bank-d-steps" style="color: #0f0; font-weight:bold;">0</span></div>
+                </div>
+                
+                <div style="display:flex; gap:8px; margin-top:12px;">
+                    <button class="push-btn" onmousedown="systems.rods.manualMove('in')" onmouseup="systems.rods.stop()" onmouseleave="systems.rods.stop()">IN</button>
+                    <button class="push-btn" onmousedown="systems.rods.manualMove('out')" onmouseup="systems.rods.stop()" onmouseleave="systems.rods.stop()">OUT</button>
+                </div>
+                
+                <div class="pid-faceplate" style="margin-top: 8px;">
+                    <div style="grid-column: span 2; font-size: 10px; color: #888;">ROD CONTROL MODE</div>
+                    <button class="pid-mode-btn active" id="btn-rod-man" onclick="systems.rods.setMode('MAN')">MAN</button>
+                    <button class="pid-mode-btn" id="btn-rod-auto" onclick="systems.rods.setMode('AUTO')">AUTO</button>
+                </div>
+                <button class="push-btn green" style="margin-top:5px" onclick="systems.rods.resetBreakers()">CLOSE BREAKERS</button>
+            </div>
+
+            <!-- PRESSURIZER CONTROLLER -->
+            <div class="group-box">
+                <div class="group-label">PZR PRESS MASTER (PIC-455)</div>
+                <div class="meter-row">
+                    <span class="meter-label">PRESSURE</span>
+                    <div class="digital-readout" id="val-press">15 PSIG</div>
+                </div>
+                <div class="pid-faceplate">
+                    <div class="pid-bar-container">
+                        <div class="pid-pv-bar" id="pzr-pv-bar" style="width: 0%"></div>
+                        <div class="pid-sp-tri" id="pzr-sp-tri" style="left: 50%"></div>
+                    </div>
+                    <div style="grid-column: span 2" class="meter-row">
+                        <span class="meter-label">OUTPUT (HTR/SPRY)</span>
+                        <div class="pid-out-bar" id="pzr-out-bar" style="width: 0%"></div>
+                    </div>
+                    <button class="pid-mode-btn active" id="btn-pzr-man" onclick="systems.pzr.setMode('MAN')">MAN</button>
+                    <button class="pid-mode-btn" id="btn-pzr-auto" onclick="systems.pzr.setMode('AUTO')">AUTO</button>
+                </div>
+                <div class="meter-row" style="margin-top:6px; gap:5px">
+                    <button class="push-btn" onmousedown="systems.pzr.manualOutput(-0.5)" onmouseup="systems.pzr.manualOutput(0)">SPRAY</button>
+                    <button class="push-btn" onmousedown="systems.pzr.manualOutput(1.0)" onmouseup="systems.pzr.manualOutput(0)">HEAT</button>
+                </div>
+                <div class="meter-row" style="margin-top: 6px;">
+                    <span class="meter-label">HEATERS</span>
+                    <span id="ind-heat" style="color: #555; font-weight:bold">OFF</span>
+                    <span class="meter-label">SPRAY</span>
+                    <span id="ind-spray" style="color: #555; font-weight:bold">CLOSED</span>
+                </div>
+            </div>
+
+            <!-- SAFETY SYSTEMS -->
+            <div class="group-box" style="border-color: #522;">
+                <div class="group-label" style="color: #f88">ECCS / SAFETY</div>
+                <div class="meter-row">
+                    <span class="meter-label">SI PUMPS</span>
+                    <div class="bistable-light" id="ind-si-pump">TRIPPED</div>
+                </div>
+                <div class="meter-row">
+                    <span class="meter-label">ACCUMULATORS</span>
+                    <div class="bistable-light" id="ind-acc">READY</div>
+                </div>
+                <button class="push-btn red" onclick="systems.reactor.trip('MANUAL')">MANUAL SCRAM</button>
+                <button class="push-btn" style="margin-top:4px; border-color: #f88;" onclick="systems.si.actuate()">MANUAL SI</button>
+            </div>
+
+        </div>
+    </div>
+
+    <!-- CORE & TRENDS -->
+    <div class="section" style="flex: 1.5;">
+        <div class="section-header">
+            <span>Core Monitoring</span>
+            <span style="color: var(--led-amber)">NIS / FLUKE</span>
+        </div>
+        <div class="panel-content">
+            
+            <div style="display: flex; gap: 15px;">
+                <div style="flex:1">
+                    <div class="meter-row">
+                        <span class="meter-label">POWER (NI)</span>
+                        <div class="digital-readout" id="val-power">0.00 %</div>
+                    </div>
+                    <div class="meter-row">
+                        <span class="meter-label">SUR (DPM)</span>
+                        <div class="digital-readout" id="val-sur">0.0</div>
+                    </div>
+                </div>
+                <div style="flex:1">
+                    <div class="meter-row">
+                        <span class="meter-label">T-AVG</span>
+                        <div class="digital-readout" id="val-tavg">70.0 °F</div>
+                    </div>
+                    <div class="meter-row">
+                        <span class="meter-label">T-REF</span>
+                        <div class="digital-readout" id="val-tref" style="color: #888">547.0 °F</div>
+                    </div>
+                </div>
+            </div>
+
+            <canvas id="trend-canvas" height="150"></canvas>
+            <div style="display:flex; justify-content:center; gap:20px; font-size:11px;">
+                <span style="color: #0f0">█ POWER</span>
+                <span style="color: #f00">█ T-AVG</span>
+                <span style="color: #44f">█ PRESS</span>
+            </div>
+
+            <div class="group-box">
+                <div class="group-label">THERMAL LIMITS</div>
+                <div class="bistable-light" id="trip-otdt">OVERTEMP DELTA-T</div>
+                <div class="bistable-light" id="trip-opdt">OVERPOWER DELTA-T</div>
+                <div class="meter-row" style="margin-top:8px;">
+                    <span class="meter-label">DELTA-T</span>
+                    <div class="digital-readout" id="val-dt">0.0 °F</div>
+                </div>
+            </div>
+
+             <div class="group-box">
+                <div class="group-label">CHEMICAL & VOLUME</div>
+                <div class="meter-row">
+                    <span class="meter-label">BORON CONC</span>
+                    <div class="digital-readout" id="val-boron">2000 ppm</div>
+                </div>
+                <div style="display:flex; gap:8px; margin-top: 5px;">
+                    <button class="push-btn" onmousedown="systems.cvcs.borate(true)" onmouseup="systems.cvcs.borate(false)">BORATE</button>
+                    <button class="push-btn" onmousedown="systems.cvcs.dilute(true)" onmouseup="systems.cvcs.dilute(false)">DILUTE</button>
+                </div>
+            </div>
+
+        </div>
+    </div>
+
+    <!-- SECONDARY & TURBINE -->
+    <div class="section">
+        <div class="section-header">
+            <span>Secondary Cycle</span>
+            <span style="color: #44f">BOP</span>
+        </div>
+        <div class="panel-content">
+
+            <div class="group-box">
+                <div class="group-label">SG LEVEL CONTROL (LC-550)</div>
+                <div class="meter-row">
+                    <span class="meter-label">NARROW RANGE</span>
+                    <div class="digital-readout" id="val-sg-lvl">30.0 %</div>
+                </div>
+                <div class="meter-row">
+                    <span class="meter-label">STM FLOW</span>
+                    <span class="meter-label" id="val-stm-flow">0.0 Mlb/hr</span>
+                </div>
+                <div class="meter-row">
+                    <span class="meter-label">FEED FLOW</span>
+                    <span class="meter-label" id="val-feed-flow">0.0 Mlb/hr</span>
+                </div>
+                <div class="pid-faceplate" style="margin-top:8px;">
+                    <div class="pid-bar-container">
+                        <div class="pid-pv-bar" id="sg-pv-bar" style="width: 30%; background: #44f"></div>
+                        <div class="pid-sp-tri" id="sg-sp-tri" style="left: 50%"></div>
+                    </div>
+                    <button class="pid-mode-btn active" id="btn-sg-man" onclick="systems.sg.setMode('MAN')">MAN</button>
+                    <button class="pid-mode-btn" id="btn-sg-auto" onclick="systems.sg.setMode('AUTO')">AUTO</button>
+                </div>
+                <div class="meter-row" style="margin-top:6px; gap:5px">
+                    <button class="push-btn" onmousedown="systems.sg.manualFill(1)" onmouseup="systems.sg.manualFill(0)">FILL (OPEN)</button>
+                    <button class="push-btn" onmousedown="systems.sg.manualFill(-1)" onmouseup="systems.sg.manualFill(0)">DRAIN (CLOSE)</button>
+                </div>
+            </div>
+
+            <div class="group-box">
+                <div class="group-label">STEAM DUMP CONTROL</div>
+                <div class="meter-row">
+                     <span class="meter-label">MODE</span>
+                     <span id="sdcs-mode" style="color: var(--led-green); font-weight:bold">T-AVG</span>
+                </div>
+                <div class="meter-row">
+                    <span class="meter-label">DEMAND</span>
+                    <div class="bar-graph-container" style="width: 80px; height:10px;"><div class="bar-fill" id="bar-dumps" style="width:0%"></div></div>
+                </div>
+                <div class="bistable-light" id="ind-dumps-arm">ARMED (C-9)</div>
+            </div>
+
+            <div class="group-box">
+                <div class="group-label">TURBINE / GENERATOR</div>
+                <div class="meter-row">
+                    <span class="meter-label">SPEED</span>
+                    <div class="digital-readout" style="color: var(--led-amber)" id="val-rpm">0 RPM</div>
+                </div>
+                <div class="meter-row">
+                    <span class="meter-label">VIBRATION</span>
+                    <div class="bar-graph-container" style="width: 80px; height:10px;"><div class="bar-fill" id="bar-vib" style="width:0%; background: #f0f;"></div></div>
+                </div>
+                <hr style="border-color: #333; margin: 8px 0;">
+                
+                <div class="meter-row">
+                    <span class="meter-label">GOVERNOR</span>
+                    <input type="range" min="0" max="100" value="0" id="gov-slider">
+                    <span class="meter-label" id="val-gov">0%</span>
+                </div>
+
+                <div class="meter-row">
+                    <span class="meter-label">MW (REAL)</span>
+                    <div class="digital-readout" id="val-mw" style="color: #aaf">0 MW</div>
+                </div>
+                <div class="meter-row">
+                    <span class="meter-label">MVAR (REAC)</span>
+                    <div class="digital-readout" id="val-mvar" style="color: #f88">0 MVAR</div>
+                </div>
+                
+                <div class="meter-row" style="margin-top:8px">
+                    <span class="meter-label">VOLTAGE REG</span>
+                    <input type="range" min="0" max="100" value="50" id="exc-slider">
+                </div>
+
+                <div style="border: 1px solid #444; padding: 6px; margin-top: 8px; text-align: center; background: #000;">
+                    <div style="font-size: 10px; color: #888; margin-bottom: 5px;">SYNCHROSCOPE</div>
+                    <div id="sync-needle" style="width: 2px; height: 25px; background: #fff; margin: 5px auto; transform: rotate(0deg);"></div>
+                    <div id="sync-lamp" style="width: 12px; height: 12px; border-radius: 50%; background: #222; margin: auto;"></div>
+                    <button class="push-btn" id="btn-breaker" style="margin-top:8px" onclick="systems.elec.toggleBreaker()">CLOSE OCB</button>
+                </div>
+            </div>
+
+        </div>
+    </div>
+
+</div>
+
+<script>
+
+// --- SIMULATION CONSTANTS & UTILS ---
+const FPS = 60;
+let dt = 1/FPS;
+let timeScale = 1;
+let frozen = false;
+
+const BETA = 0.0065;     
+const LAMBDA = 0.08;     
+const L_STAR = 0.0001;   
+const FUEL_MASS = 1000;  
+const COOL_MASS = 4000;  
+const UA = 500;          
+
+// --- SYSTEMS OBJECTS ---
+
+const alarmSystem = {
+    alarms: {},
+    hasFirstOut: false,
+    init: function() {
+        document.querySelectorAll('.alarm-tile').forEach(el => {
+            this.alarms[el.id] = { 
+                id: el.id, 
+                active: false, 
+                acked: false, 
+                firstOut: el.dataset.firstout === "true",
+                el: el 
+            };
+            el.addEventListener('click', () => {
+                if(this.alarms[el.id].active) this.acknowledge(el.id);
+            });
+        });
+    },
+    trigger: function(id, condition) {
+        let a = this.alarms[id];
+        if (!a) return;
+
+        if (condition) {
+            if (!a.active) {
+                a.active = true;
+                a.acked = false;
+                this.updateStyle(a);
+                if (a.firstOut && !this.hasFirstOut) {
+                    a.el.classList.add('first-out');
+                    this.hasFirstOut = true;
+                }
+            }
+        } else {
+            if (a.active) {
+                a.active = false;
+                this.updateStyle(a);
+            }
+        }
+    },
+    acknowledge: function(specificId = null) {
+        for (let key in this.alarms) {
+            let a = this.alarms[key];
+            if (specificId && a.id !== specificId) continue;
+            if (a.active && !a.acked) {
+                a.acked = true;
+                this.updateStyle(a);
+            }
+        }
+    },
+    reset: function() {
+        for (let key in this.alarms) {
+            let a = this.alarms[key];
+            if (!a.active) {
+                a.acked = true; 
+                a.el.classList.remove('first-out');
+                this.updateStyle(a);
+            }
+            if (a.firstOut && !a.active) this.hasFirstOut = false;
+        }
+    },
+    updateStyle: function(a) {
+        a.el.className = "alarm-tile"; 
+        if (a.firstOut && this.hasFirstOut && a.active) a.el.classList.add('first-out');
+        
+        if (a.active && !a.acked) a.el.classList.add('active-new');
+        else if (a.active && a.acked) a.el.classList.add('active-ack');
+        else if (!a.active && !a.acked) a.el.classList.add('cleared-new'); 
+    },
+    test: function() {
+        for(let k in this.alarms) this.alarms[k].el.classList.toggle('active-new');
+    }
+};
+
+const systems = {
+    reactor: {
+        power: 1e-11, 
+        precursors: 1e-11,
+        reactivity: 0,
+        sur: 0,
+        fuelTemp: 70, // Fixed to 70F
+        coolantTemp: 70, // Fixed to 70F
+        lastTemp: 70, // Fixed to 70F
+        
+        step: function() {
+            let rho_rods = systems.rods.getReactivity();
+            let rho_boron = (1200 - systems.cvcs.boron) * 0.00005; 
+            let rho_doppler = (this.fuelTemp - 547) * -0.00002; 
+            let rho_total = rho_rods + rho_boron + rho_doppler;
+            
+            let dP = ((rho_total - BETA) / L_STAR) * this.power + (LAMBDA * this.precursors);
+            let dC = (BETA / L_STAR) * this.power - (LAMBDA * this.precursors);
+            
+            this.power += dP * dt * timeScale;
+            this.precursors += dC * dt * timeScale;
+
+            if (this.power < 1e-12) this.power = 1e-12;
+            this.sur = (dP / this.power) * 26.06;
+            if(this.power < 1e-9) this.sur = 0; 
+
+            let Q_gen = this.power * 3412; 
+            let Q_trans = UA * (this.fuelTemp - this.coolantTemp);
+            
+            this.fuelTemp += ((Q_gen - Q_trans) / FUEL_MASS) * dt * timeScale;
+            
+            let Q_out = systems.sg.getHeatRemoval(this.coolantTemp);
+            let Q_pumps = 20; 
+            
+            this.coolantTemp += ((Q_trans - Q_out + Q_pumps) / COOL_MASS) * dt * timeScale;
+            
+            let ambientLoss = (this.coolantTemp - 70) * 0.05;
+            this.coolantTemp -= ambientLoss * dt * timeScale;
+
+            if (this.power > 1.08) this.trip("Overpower");
+            
+            let dT = this.coolantTemp - 547; 
+            if (Math.abs(dT) > 5 && !systems.rods.scrammed) alarmSystem.trigger('al-tavg-dev', true);
+            else alarmSystem.trigger('al-tavg-dev', false);
+        },
+        trip: function(cause) {
+            systems.rods.scram();
+            alarmSystem.trigger('al-trip', true);
+        }
+    },
+
+    rods: {
+        steps: 228, 
+        bankD: 0, 
+        mode: 'MAN', 
+        demandSpeed: 0, 
+        scrammed: true, 
+
+        setMode: function(m) {
+            if(this.scrammed) return;
+            this.mode = m;
+            document.getElementById('btn-rod-man').classList.toggle('active', m==='MAN');
+            document.getElementById('btn-rod-auto').classList.toggle('active', m==='AUTO');
+        },
+        resetBreakers: function() {
+             this.scrammed = false;
+             alarmSystem.trigger('al-trip', false);
+             alarmSystem.hasFirstOut = false;
+             document.querySelectorAll('.first-out').forEach(e => e.classList.remove('first-out'));
+        },
+        manualMove: function(dir) {
+            if (this.mode !== 'MAN' || this.scrammed) return;
+            this.demandSpeed = (dir === 'in') ? -48 : 48;
+        },
+        stop: function() {
+            if (this.mode === 'MAN') this.demandSpeed = 0;
+        },
+        scram: function() {
+            this.scrammed = true;
+            this.mode = 'MAN';
+            this.demandSpeed = 0;
+            document.getElementById('btn-rod-man').classList.add('active');
+            document.getElementById('btn-rod-auto').classList.remove('active');
+        },
+        getReactivity: function() {
+            let insertion = (228 - this.bankD) / 228;
+            let worth = insertion * -0.04; 
+            if(this.scrammed) worth = -0.10; 
+            return worth;
+        },
+        step: function() {
+            if (this.scrammed) {
+                this.bankD -= 20 * timeScale; 
+                if(this.bankD<0) this.bankD=0;
+                return;
+            }
+
+            if (this.mode === 'AUTO') {
+                let err = systems.reactor.coolantTemp - systems.getTref();
+                if (Math.abs(err) > 1.5) {
+                    this.demandSpeed = err * 10; 
+                    this.demandSpeed = Math.max(-72, Math.min(72, this.demandSpeed));
+                } else {
+                    this.demandSpeed = 0;
+                }
+            }
+
+            if (this.demandSpeed !== 0) {
+                let dStep = (this.demandSpeed / 60) * dt * timeScale;
+                this.bankD += dStep;
+                if(this.bankD > 228) this.bankD = 228;
+                if(this.bankD < 0) this.bankD = 0;
+            }
+        }
+    },
+
+    pzr: {
+        pressure: 15, 
+        setpoint: 2235,
+        mode: 'MAN',
+        output: 0, 
+        pid: { i: 0 },
+
+        setMode: function(m) {
+            this.mode = m;
+            document.getElementById('btn-pzr-man').classList.toggle('active', m==='MAN');
+            document.getElementById('btn-pzr-auto').classList.toggle('active', m==='AUTO');
+        },
+        manualOutput: function(val) {
+            if(this.mode === 'MAN') this.output = val;
+        },
+        step: function() {
+            if (this.mode === 'AUTO') {
+                let err = this.setpoint - this.pressure;
+                this.pid.i += err * dt * 0.1;
+                this.pid.i = Math.max(-0.5, Math.min(0.5, this.pid.i)); 
+                this.output = (err * 0.02) + this.pid.i;
+            }
+            
+            this.output = Math.max(-1, Math.min(1, this.output));
+
+            // Increase Heater Power slightly so users feel the button working
+            let heatAdd = (this.output > 0) ? this.output * 150 * dt : 0; 
+            let sprayRem = (this.output < 0) ? this.output * 300 * dt : 0; 
+            
+            let surge = (systems.reactor.coolantTemp - systems.reactor.lastTemp) * 10 || 0; 
+            systems.reactor.lastTemp = systems.reactor.coolantTemp;
+
+            let ambient = -0.1 * dt;
+
+            // FIX: Calculate pressure change first, THEN clamp
+            let dPress = (heatAdd + sprayRem + surge + ambient) * timeScale;
+            this.pressure += dPress;
+
+            // Clamp Minimum
+            if (this.pressure < 15) this.pressure = 15;
+
+            alarmSystem.trigger('al-press-hi', this.pressure > 2350);
+            alarmSystem.trigger('al-press-lo', this.pressure < 1900);
+            
+            // P-11 INTERLOCK Logic
+            if (this.pressure > 1900) {
+                systems.si.blocked = false;
+            }
+
+            if (this.pressure < 1700 && !systems.si.active && !systems.rods.scrammed && !systems.si.blocked) {
+                 systems.si.actuate();
+            }
+        }
+    },
+
+    cvcs: {
+        boron: 2000, 
+        isBorating: false,
+        isDiluting: false,
+        step: function() {
+            if (this.isBorating) this.boron += 10 * dt * timeScale;
+            if (this.isDiluting && this.boron > 0) this.boron -= 10 * dt * timeScale;
+        },
+        borate: function(s) { this.isBorating = s; },
+        dilute: function(s) { this.isDiluting = s; }
+    },
+
+    si: {
+        active: false,
+        blocked: true, // Starts blocked for Cold Start
+        step: function() {
+            if (this.active) {
+                systems.cvcs.boron += 10 * dt * timeScale; 
+                systems.pzr.pressure += 50 * dt * timeScale;
+            }
+        },
+        actuate: function() {
+            if (this.active) return;
+            this.active = true;
+            alarmSystem.trigger('al-si', true);
+            alarmSystem.trigger('al-ecc-act', true);
+            document.getElementById('ind-si-pump').classList.add('tripped');
+            document.getElementById('ind-si-pump').innerText = "RUNNING";
+            systems.reactor.trip('SI');
+        }
+    },
+
+    sg: {
+        level: 30, 
+        steamPress: 0,
+        steamFlow: 0,
+        feedFlow: 0,
+        mode: 'MAN', 
+        setpoint: 50,
+        valvePos: 0, 
+        pid: { i: 0, prevErr: 0 },
+
+        setMode: function(m) {
+            this.mode = m;
+            document.getElementById('btn-sg-man').classList.toggle('active', m==='MAN');
+            document.getElementById('btn-sg-auto').classList.toggle('active', m==='AUTO');
+        },
+        manualFill: function(val) {
+             if(this.mode === 'MAN') {
+                 this.valvePos += val * 0.01;
+                 if(this.valvePos > 1) this.valvePos = 1;
+                 if(this.valvePos < 0) this.valvePos = 0;
+             }
+        },
+        getHeatRemoval: function(rcsTemp) {
+            let dT = rcsTemp - (70 + (this.steamPress * 0.2)); // Adjusted base to 70F
+            if (dT < 0) dT = 0;
+            return dT * 100; 
+        },
+        step: function() {
+            let turbDemand = systems.turb.tripped ? 0 : systems.turb.gov / 100;
+            let dumpDemand = systems.bop.dumpValve;
+            let totalSteamValve = turbDemand + dumpDemand;
+            
+            this.steamFlow = this.steamPress * totalSteamValve * 0.01; 
+
+            if (this.mode === 'AUTO') {
+                let err = this.setpoint - this.level;
+                
+                this.pid.i += err * dt * 0.05;
+                this.pid.i = Math.max(-0.5, Math.min(0.5, this.pid.i));
+                
+                this.valvePos = (err * 0.05) + this.pid.i + (this.steamFlow * 0.5); 
+            }
+            // Clamp Valve Pos
+            this.valvePos = Math.max(0, Math.min(1, this.valvePos));
+            
+            this.feedFlow = this.valvePos * 2.0; 
+
+            let massBalance = (this.feedFlow - this.steamFlow);
+            let swellTerm = (this.steamFlow * 0.1); 
+            let shrinkTerm = (this.feedFlow * -0.05); 
+            
+            let dLvl = (massBalance * 0.5 + (swellTerm + shrinkTerm)*0.1) * dt * timeScale;
+            this.level += dLvl;
+
+            let boiling = (systems.reactor.coolantTemp - 212) * 0.1; 
+            if (boiling < 0) boiling = 0;
+            
+            this.steamPress += (boiling - (this.steamFlow*50)) * dt * timeScale;
+            if(this.steamPress < 0) this.steamPress = 0;
+            if(this.steamPress > 1100) this.steamPress = 1090; 
+
+            alarmSystem.trigger('al-sg-lo', this.level < 20);
+        }
+    },
+
+    turb: {
+        rpm: 0,
+        gov: 0,
+        vib: 0,
+        tripped: true,
+        
+        step: function() {
+            if (!this.tripped) {
+                let steamTorque = systems.sg.steamFlow * 2000;
+                let loadTorque = 0;
+                
+                if (systems.elec.breaker) loadTorque = 1800; 
+                else loadTorque = this.rpm * 0.1; 
+
+                let acc = (steamTorque - loadTorque) * dt * timeScale;
+                this.rpm += acc;
+            } else {
+                this.rpm -= 10 * dt * timeScale; 
+            }
+
+            if(this.rpm < 0) this.rpm = 0;
+            
+            this.vib = (this.rpm / 4000) * 10; 
+            if (this.rpm > 1200 && this.rpm < 1400) this.vib += 50; 
+            if (this.rpm > 1900) this.vib += (this.rpm - 1900); 
+            
+            if (this.vib > 80) alarmSystem.trigger('al-vib-hi', true);
+            
+            if (this.rpm > 1950) {
+                this.tripped = true;
+                systems.elec.breaker = false;
+                alarmSystem.trigger('al-turb-trip', true);
+                systems.reactor.trip('Turbine');
+            }
+        }
+    },
+
+    elec: {
+        mw: 0,
+        mvar: 0,
+        freq: 60,
+        phase: 0,
+        breaker: false,
+        excitation: 50,
+        
+        toggleBreaker: function() {
+            if (this.breaker) {
+                this.breaker = false; 
+            } else {
+                if (Math.abs(this.phase) < 0.3 && Math.abs(systems.turb.rpm - 1800) < 20) {
+                    this.breaker = true;
+                } else {
+                    alarmSystem.trigger('al-gen-trip', true);
+                    systems.turb.tripped = true;
+                    alert("CRASH SYNCHRONIZATION! TURBINE SHAFT SHEARED.");
+                }
+            }
+        },
+        step: function() {
+            let gridFreq = 60;
+            let genFreq = systems.turb.rpm / 30;
+            let dFreq = genFreq - gridFreq;
+            
+            this.phase += dFreq * dt * 2 * Math.PI * timeScale;
+            this.phase = this.phase % (2*Math.PI);
+            if (this.phase > Math.PI) this.phase -= 2*Math.PI;
+
+            if (this.breaker) {
+                systems.turb.rpm = 1800; 
+                this.mw = systems.turb.gov * 12; 
+                let voltageErr = this.excitation - 50;
+                this.mvar = voltageErr * 2;
+            } else {
+                this.mw = 0;
+                this.mvar = 0;
+            }
+        }
+    },
+
+    bop: {
+        dumpValve: 0, 
+        mode: 'TAVG', 
+        step: function() {
+            let tAvgErr = systems.reactor.coolantTemp - 550; 
+            let armed = systems.turb.tripped || (Math.abs(systems.reactor.power - systems.elec.mw/1200) > 0.1);
+            document.getElementById('ind-dumps-arm').classList.toggle('tripped', armed);
+
+            if (armed && tAvgErr > 2) {
+                this.dumpValve = tAvgErr * 0.1; 
+                this.dumpValve = Math.min(1, this.dumpValve);
+            } else {
+                this.dumpValve = 0;
+            }
+        }
+    },
+
+    getTref: function() {
+        let turbinePower = systems.turb.gov / 100; 
+        return 547 + (33 * turbinePower); 
+    }
+};
+
+function gameLoop() {
+    if(frozen) return;
+    systems.reactor.step();
+    systems.rods.step();
+    systems.pzr.step();
+    systems.cvcs.step();
+    systems.si.step();
+    systems.sg.step();
+    systems.turb.step();
+    systems.elec.step();
+    systems.bop.step();
+    updateUI();
+}
+
+function updateUI() {
+    document.getElementById('clock').innerText = new Date().toLocaleTimeString();
+    const fmt = (n, d=1) => n.toFixed(d);
+
+    document.getElementById('val-rod-speed').innerText = Math.floor(systems.rods.demandSpeed) + " SPM";
+    document.getElementById('bar-rod-speed').style.width = (50 + (systems.rods.demandSpeed/1.44)) + "%";
+    document.getElementById('bank-d-steps').innerText = Math.floor(systems.rods.bankD);
+
+    let pwrDisplay = systems.reactor.power * 100;
+    let pwrStr = (pwrDisplay < 0.01) ? pwrDisplay.toExponential(2) : pwrDisplay.toFixed(2);
+    document.getElementById('val-power').innerText = pwrStr + " %";
+    
+    document.getElementById('val-sur').innerText = systems.reactor.sur.toFixed(2);
+    document.getElementById('val-tavg').innerText = fmt(systems.reactor.coolantTemp) + " °F";
+    document.getElementById('val-tref').innerText = fmt(systems.getTref()) + " °F";
+    document.getElementById('val-dt').innerText = fmt(systems.reactor.fuelTemp - systems.reactor.coolantTemp) + " °F";
+    document.getElementById('val-boron').innerText = Math.floor(systems.cvcs.boron) + " ppm";
+
+    document.getElementById('val-press').innerText = Math.floor(systems.pzr.pressure) + " PSIG";
+    document.getElementById('pzr-pv-bar').style.width = ((systems.pzr.pressure) / (2500) * 100) + "%";
+    document.getElementById('pzr-sp-tri').style.left = ((2235) / (2500) * 100) + "%";
+    let pzrOut = systems.pzr.output;
+    let bar = document.getElementById('pzr-out-bar');
+    if(pzrOut > 0) { bar.style.width = (pzrOut*50)+"%"; bar.style.marginLeft = "50%"; bar.style.background="#f44"; } 
+    else { bar.style.width = (Math.abs(pzrOut)*50)+"%"; bar.style.marginLeft = (50 - Math.abs(pzrOut)*50)+"%"; bar.style.background="#44f"; } 
+    
+    document.getElementById('ind-heat').style.color = (pzrOut > 0.1) ? "#f44" : "#555";
+    document.getElementById('ind-spray').style.color = (pzrOut < -0.1) ? "#44f" : "#555";
+
+    document.getElementById('val-sg-lvl').innerText = fmt(systems.sg.level) + " %";
+    document.getElementById('sg-pv-bar').style.width = systems.sg.level + "%";
+    document.getElementById('val-stm-flow').innerText = fmt(systems.sg.steamFlow, 2);
+    document.getElementById('val-feed-flow').innerText = fmt(systems.sg.feedFlow, 2);
+    document.getElementById('bar-dumps').style.width = (systems.bop.dumpValve * 100) + "%";
+
+    document.getElementById('val-rpm').innerText = Math.floor(systems.turb.rpm);
+    document.getElementById('bar-vib').style.width = Math.min(100, systems.turb.vib) + "%";
+    if(systems.turb.vib > 60) document.getElementById('bar-vib').style.backgroundColor = "red";
+    else document.getElementById('bar-vib').style.backgroundColor = "#0f0";
+    document.getElementById('val-gov').innerText = systems.turb.gov + "%";
+
+    document.getElementById('val-mw').innerText = fmt(systems.elec.mw) + " MW";
+    document.getElementById('val-mvar').innerText = fmt(systems.elec.mvar) + " MVAR";
+    
+    let deg = systems.elec.phase * 180 / Math.PI;
+    document.getElementById('sync-needle').style.transform = `rotate(${deg}deg)`;
+    let intensity = 1 - (Math.abs(systems.elec.phase)/Math.PI);
+    document.getElementById('sync-lamp').style.background = `rgba(255,255,255,${intensity})`;
+    document.getElementById('btn-breaker').className = systems.elec.breaker ? "push-btn red" : "push-btn";
+    document.getElementById('btn-breaker').innerText = systems.elec.breaker ? "OPEN OCB" : "CLOSE OCB";
+
+    updateTrend();
+}
+
+const ctx = document.getElementById('trend-canvas').getContext('2d');
+const cvs = document.getElementById('trend-canvas');
+// Fix canvas blur by setting resolution
+cvs.width = cvs.offsetWidth;
+cvs.height = cvs.offsetHeight;
+
+let trendData = { pow: [], tavg: [], press: [] };
+function updateTrend() {
+    if(trendData.pow.length > 200) {
+        trendData.pow.shift(); trendData.tavg.shift(); trendData.press.shift();
+    }
+    trendData.pow.push(systems.reactor.power * 100);
+    trendData.tavg.push((systems.reactor.coolantTemp - 70) / 3); 
+    trendData.press.push((systems.pzr.pressure) / 15); 
+
+    ctx.fillStyle = "#000"; ctx.fillRect(0,0,cvs.width,cvs.height);
+    
+    ctx.strokeStyle = "#222"; ctx.beginPath();
+    for(let i=0; i<cvs.height; i+=25) { ctx.moveTo(0,i); ctx.lineTo(cvs.width,i); }
+    ctx.stroke();
+
+    const drawLine = (arr, color) => {
+        ctx.strokeStyle = color; ctx.lineWidth = 1.5; ctx.beginPath();
+        let step = cvs.width / 200;
+        for(let i=0; i<arr.length; i++) {
+            let y = cvs.height - arr[i];
+            if(i==0) ctx.moveTo(0, y); else ctx.lineTo(i*step, y);
+        }
+        ctx.stroke();
+    };
+
+    drawLine(trendData.pow, '#0f0');
+    drawLine(trendData.tavg, '#f00');
+    drawLine(trendData.press, '#44f');
+}
+
+document.getElementById('gov-slider').addEventListener('input', e => {
+    systems.turb.gov = parseInt(e.target.value);
+    // Reset trip if at 0 and tripped
+    if(systems.turb.gov === 0 && systems.turb.tripped) {
+        systems.turb.tripped = false;
+        alarmSystem.trigger('al-turb-trip', false);
+    }
+});
+document.getElementById('exc-slider').addEventListener('input', e => systems.elec.excitation = parseInt(e.target.value));
+
+function setSpeed(x) {
+    timeScale = x;
+    document.querySelectorAll('.sim-controls .btn-std').forEach(b => b.classList.remove('active'));
+    document.getElementById('x'+x).classList.add('active');
+}
+
+function toggleFreeze() {
+    frozen = !frozen;
+    document.getElementById('btn-freeze').classList.toggle('active');
+}
+
+// INIT
+alarmSystem.init();
+// Run one step to trigger alarms, then Ack them for startup cleanliness
+gameLoop();
+alarmSystem.acknowledge(); 
+
+// Force PZR PRESS LO-2 to remain unacknowledged (flashing)
+if (alarmSystem.alarms['al-press-lo']) {
+    alarmSystem.alarms['al-press-lo'].acked = false;
+    alarmSystem.updateStyle(alarmSystem.alarms['al-press-lo']);
+}
+
+// Clear First Out so it doesn't look like we just tripped
+alarmSystem.hasFirstOut = false;
+document.querySelectorAll('.first-out').forEach(e => e.classList.remove('first-out'));
+
+setInterval(gameLoop, 1000/FPS);
+
+</script>
+</body>
+</html>
