@@ -154,9 +154,12 @@
         .bistable-light.tripped { background: var(--led-red); color: #fff; font-weight: bold; box-shadow: 0 0 8px var(--led-red); }
         .bar-graph-container { width: 100%; background: #000; border: 1px solid #444; margin-top: 2px; }
         
+        /* Rod Speed Center Zero Visual */
+        .center-zero { background: linear-gradient(90deg, #000 49%, #555 50%, #000 51%); }
+
         input[type=range] { width: 70px; height: 10px; cursor: pointer; }
 
-        canvas { background: #000; border: 1px solid #333; width: 100%; }
+        canvas { background: #000; width: 100%; }
         
         /* CUSTOM SCROLL */
         ::-webkit-scrollbar { width: 8px; }
@@ -230,8 +233,8 @@
                     <span class="meter-label">AUTO DEMAND</span>
                     <div class="digital-readout" id="val-rod-speed">0 SPM</div>
                 </div>
-                <div class="bar-graph-container" style="height: 8px; background: #222; margin-bottom: 8px;">
-                    <div id="bar-rod-speed" style="width: 50%; height:100%; background: #444; margin:auto;"></div>
+                <div class="bar-graph-container center-zero" style="height: 8px; margin-bottom: 8px;">
+                    <div id="bar-rod-speed" style="width: 50%; height:100%; background: #444; margin:0;"></div>
                 </div>
 
                 <div style="display:grid; grid-template-columns: 1fr 1fr; gap: 8px; font-size: 11px; text-align: center;">
@@ -334,11 +337,17 @@
                 </div>
             </div>
 
-            <canvas id="trend-canvas" height="150"></canvas>
-            <div style="display:flex; justify-content:center; gap:20px; font-size:11px;">
-                <span style="color: #0f0">█ POWER</span>
-                <span style="color: #f00">█ T-AVG</span>
-                <span style="color: #44f">█ PRESS</span>
+            <!-- UPDATED CANVAS & LEGEND -->
+            <div style="position: relative; background: #050505; border: 1px solid #333;">
+                <!-- Scanline overlay effect -->
+                <div style="position: absolute; top:0; left:0; width:100%; height:100%; pointer-events:none; background: linear-gradient(rgba(18, 16, 16, 0) 50%, rgba(0, 0, 0, 0.25) 50%), linear-gradient(90deg, rgba(255, 0, 0, 0.06), rgba(0, 255, 0, 0.02), rgba(0, 0, 255, 0.06)); background-size: 100% 2px, 3px 100%; z-index: 10;"></div>
+                <canvas id="trend-canvas" height="150"></canvas>
+            </div>
+            
+            <div style="display:flex; justify-content:center; gap:20px; font-size:11px; margin-top: 5px; user-select: none;">
+                <span id="leg-pow" onclick="toggleTrend('pow')" style="color: #0f0; cursor: pointer; transition: opacity 0.2s;">█ POWER (%)</span>
+                <span id="leg-tavg" onclick="toggleTrend('tavg')" style="color: #f00; cursor: pointer; transition: opacity 0.2s;">█ T-AVG (°F)</span>
+                <span id="leg-press" onclick="toggleTrend('press')" style="color: #44f; cursor: pointer; transition: opacity 0.2s;">█ PRESS (PSI)</span>
             </div>
 
             <div class="group-box">
@@ -467,6 +476,7 @@ const FPS = 60;
 let dt = 1/FPS;
 let timeScale = 1;
 let frozen = false;
+let simTime = new Date().getTime(); // Internal Simulation Clock
 
 const BETA = 0.0065;     
 const LAMBDA = 0.08;     
@@ -555,9 +565,9 @@ const systems = {
         precursors: 1e-11,
         reactivity: 0,
         sur: 0,
-        fuelTemp: 70, // Fixed to 70F
-        coolantTemp: 70, // Fixed to 70F
-        lastTemp: 70, // Fixed to 70F
+        fuelTemp: 70, 
+        coolantTemp: 70, 
+        lastTemp: 70, 
         
         step: function() {
             let rho_rods = systems.rods.getReactivity();
@@ -568,25 +578,27 @@ const systems = {
             let dP = ((rho_total - BETA) / L_STAR) * this.power + (LAMBDA * this.precursors);
             let dC = (BETA / L_STAR) * this.power - (LAMBDA * this.precursors);
             
-            this.power += dP * dt * timeScale;
-            this.precursors += dC * dt * timeScale;
+            this.power += dP * dt;
+            this.precursors += dC * dt;
 
             if (this.power < 1e-12) this.power = 1e-12;
             this.sur = (dP / this.power) * 26.06;
             if(this.power < 1e-9) this.sur = 0; 
 
-            let Q_gen = this.power * 3412; 
+            // FIX: Increased Heat Gen Multiplier from 3412 to 250000 to simulate MW scale
+            // relative to the water mass. This allows Fuel Temp to rise high enough to heat coolant.
+            let Q_gen = this.power * 250000; 
             let Q_trans = UA * (this.fuelTemp - this.coolantTemp);
             
-            this.fuelTemp += ((Q_gen - Q_trans) / FUEL_MASS) * dt * timeScale;
+            this.fuelTemp += ((Q_gen - Q_trans) / FUEL_MASS) * dt;
             
             let Q_out = systems.sg.getHeatRemoval(this.coolantTemp);
             let Q_pumps = 20; 
             
-            this.coolantTemp += ((Q_trans - Q_out + Q_pumps) / COOL_MASS) * dt * timeScale;
+            this.coolantTemp += ((Q_trans - Q_out + Q_pumps) / COOL_MASS) * dt;
             
             let ambientLoss = (this.coolantTemp - 70) * 0.05;
-            this.coolantTemp -= ambientLoss * dt * timeScale;
+            this.coolantTemp -= ambientLoss * dt;
 
             if (this.power > 1.08) this.trip("Overpower");
             
@@ -641,7 +653,7 @@ const systems = {
         },
         step: function() {
             if (this.scrammed) {
-                this.bankD -= 20 * timeScale; 
+                this.bankD -= 20 * dt; 
                 if(this.bankD<0) this.bankD=0;
                 return;
             }
@@ -657,7 +669,7 @@ const systems = {
             }
 
             if (this.demandSpeed !== 0) {
-                let dStep = (this.demandSpeed / 60) * dt * timeScale;
+                let dStep = (this.demandSpeed / 60) * dt;
                 this.bankD += dStep;
                 if(this.bankD > 228) this.bankD = 228;
                 if(this.bankD < 0) this.bankD = 0;
@@ -700,7 +712,7 @@ const systems = {
             let ambient = -0.1 * dt;
 
             // FIX: Calculate pressure change first, THEN clamp
-            let dPress = (heatAdd + sprayRem + surge + ambient) * timeScale;
+            let dPress = (heatAdd + sprayRem + surge + ambient);
             this.pressure += dPress;
 
             // Clamp Minimum
@@ -725,8 +737,8 @@ const systems = {
         isBorating: false,
         isDiluting: false,
         step: function() {
-            if (this.isBorating) this.boron += 10 * dt * timeScale;
-            if (this.isDiluting && this.boron > 0) this.boron -= 10 * dt * timeScale;
+            if (this.isBorating) this.boron += 10 * dt;
+            if (this.isDiluting && this.boron > 0) this.boron -= 10 * dt;
         },
         borate: function(s) { this.isBorating = s; },
         dilute: function(s) { this.isDiluting = s; }
@@ -737,8 +749,8 @@ const systems = {
         blocked: true, // Starts blocked for Cold Start
         step: function() {
             if (this.active) {
-                systems.cvcs.boron += 10 * dt * timeScale; 
-                systems.pzr.pressure += 50 * dt * timeScale;
+                systems.cvcs.boron += 10 * dt; 
+                systems.pzr.pressure += 50 * dt;
             }
         },
         actuate: function() {
@@ -775,9 +787,10 @@ const systems = {
              }
         },
         getHeatRemoval: function(rcsTemp) {
-            let dT = rcsTemp - (70 + (this.steamPress * 0.2)); // Adjusted base to 70F
+            let dT = rcsTemp - (250 + (this.steamPress * 0.3)); 
             if (dT < 0) dT = 0;
-            return dT * 100; 
+            // FIX: Increased heat removal capability (100 -> 5000) to match new high power reactor output
+            return dT * 5000; 
         },
         step: function() {
             let turbDemand = systems.turb.tripped ? 0 : systems.turb.gov / 100;
@@ -797,19 +810,20 @@ const systems = {
             // Clamp Valve Pos
             this.valvePos = Math.max(0, Math.min(1, this.valvePos));
             
-            this.feedFlow = this.valvePos * 2.0; 
+            // BUG FIX: Increased feed pump capacity significantly to match steam flow
+            this.feedFlow = this.valvePos * 12.0; 
 
             let massBalance = (this.feedFlow - this.steamFlow);
             let swellTerm = (this.steamFlow * 0.1); 
             let shrinkTerm = (this.feedFlow * -0.05); 
             
-            let dLvl = (massBalance * 0.5 + (swellTerm + shrinkTerm)*0.1) * dt * timeScale;
+            let dLvl = (massBalance * 0.5 + (swellTerm + shrinkTerm)*0.1) * dt;
             this.level += dLvl;
 
             let boiling = (systems.reactor.coolantTemp - 212) * 0.1; 
             if (boiling < 0) boiling = 0;
             
-            this.steamPress += (boiling - (this.steamFlow*50)) * dt * timeScale;
+            this.steamPress += (boiling - (this.steamFlow*50)) * dt;
             if(this.steamPress < 0) this.steamPress = 0;
             if(this.steamPress > 1100) this.steamPress = 1090; 
 
@@ -831,10 +845,10 @@ const systems = {
                 if (systems.elec.breaker) loadTorque = 1800; 
                 else loadTorque = this.rpm * 0.1; 
 
-                let acc = (steamTorque - loadTorque) * dt * timeScale;
+                let acc = (steamTorque - loadTorque) * dt;
                 this.rpm += acc;
             } else {
-                this.rpm -= 10 * dt * timeScale; 
+                this.rpm -= 10 * dt; 
             }
 
             if(this.rpm < 0) this.rpm = 0;
@@ -880,7 +894,7 @@ const systems = {
             let genFreq = systems.turb.rpm / 30;
             let dFreq = genFreq - gridFreq;
             
-            this.phase += dFreq * dt * 2 * Math.PI * timeScale;
+            this.phase += dFreq * dt * 2 * Math.PI;
             this.phase = this.phase % (2*Math.PI);
             if (this.phase > Math.PI) this.phase -= 2*Math.PI;
 
@@ -921,20 +935,28 @@ const systems = {
 
 function gameLoop() {
     if(frozen) return;
-    systems.reactor.step();
-    systems.rods.step();
-    systems.pzr.step();
-    systems.cvcs.step();
-    systems.si.step();
-    systems.sg.step();
-    systems.turb.step();
-    systems.elec.step();
-    systems.bop.step();
+    
+    // SUB-STEPPING:
+    // Calculate physics multiple times per frame based on timeScale
+    for(let i = 0; i < timeScale; i++) {
+        simTime += 1000 * dt; // Advance internal clock
+        
+        systems.reactor.step();
+        systems.rods.step();
+        systems.pzr.step();
+        systems.cvcs.step();
+        systems.si.step();
+        systems.sg.step();
+        systems.turb.step();
+        systems.elec.step();
+        systems.bop.step();
+    }
+    
     updateUI();
 }
 
 function updateUI() {
-    document.getElementById('clock').innerText = new Date().toLocaleTimeString();
+    document.getElementById('clock').innerText = new Date(simTime).toLocaleTimeString();
     const fmt = (n, d=1) => n.toFixed(d);
 
     document.getElementById('val-rod-speed').innerText = Math.floor(systems.rods.demandSpeed) + " SPM";
@@ -987,46 +1009,180 @@ function updateUI() {
     updateTrend();
 }
 
-const ctx = document.getElementById('trend-canvas').getContext('2d');
+// --- TRENDING SYSTEM ---
+
 const cvs = document.getElementById('trend-canvas');
-// Fix canvas blur by setting resolution
+const ctx = cvs.getContext('2d');
+
+// Fix resolution
 cvs.width = cvs.offsetWidth;
 cvs.height = cvs.offsetHeight;
 
-let trendData = { pow: [], tavg: [], press: [] };
-function updateTrend() {
-    if(trendData.pow.length > 200) {
-        trendData.pow.shift(); trendData.tavg.shift(); trendData.press.shift();
-    }
-    trendData.pow.push(systems.reactor.power * 100);
-    trendData.tavg.push((systems.reactor.coolantTemp - 70) / 3); 
-    trendData.press.push((systems.pzr.pressure) / 15); 
+// Configuration
+const trendConfig = {
+    samplingRate: 5, // Only push data every X frames
+    gridInterval: 40, // Draw a vertical grid line every X data points
+    ranges: {
+        pow:   { min: 0, max: 120 },      // 0 - 120 %
+        tavg:  { min: 530, max: 600 },    // 530 - 600 °F
+        press: { min: 1700, max: 2400 }   // 1700 - 2400 PSI
+    },
+    visible: { pow: true, tavg: true, press: true }
+};
 
-    ctx.fillStyle = "#000"; ctx.fillRect(0,0,cvs.width,cvs.height);
+// State
+let trendData = { pow: [], tavg: [], press: [] };
+let trendFrameCounter = 0;
+let totalSamples = 0; // Tracks total data points ever generated for grid sync
+
+function toggleTrend(key) {
+    trendConfig.visible[key] = !trendConfig.visible[key];
+    document.getElementById('leg-' + key).style.opacity = trendConfig.visible[key] ? "1" : "0.3";
+    drawTrendInternal(); 
+}
+
+function updateTrend() {
+    trendFrameCounter++;
+
+    // 1. Data Collection (Throttled)
+    if (trendFrameCounter % trendConfig.samplingRate === 0) {
+        totalSamples++; // Increment sample count
+        
+        if (trendData.pow.length > 200) {
+            trendData.pow.shift(); 
+            trendData.tavg.shift(); 
+            trendData.press.shift();
+        }
+        
+        trendData.pow.push(systems.reactor.power * 100);
+        trendData.tavg.push(systems.reactor.coolantTemp);
+        trendData.press.push(systems.pzr.pressure);
+    }
+
+    // 2. Render
+    drawTrendInternal();
+}
+
+function drawTrendInternal() {
+    // Clear
+    ctx.clearRect(0, 0, cvs.width, cvs.height);
     
-    ctx.strokeStyle = "#222"; ctx.beginPath();
-    for(let i=0; i<cvs.height; i+=25) { ctx.moveTo(0,i); ctx.lineTo(cvs.width,i); }
+    // Calculate step width
+    // We aim to fill the canvas with 200 points
+    let step = cvs.width / 200; 
+    
+    // --- DRAW VERTICAL GRID (LOCKED TO DATA) ---
+    ctx.strokeStyle = "#1a1a1a"; 
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+
+    let dataLen = trendData.pow.length;
+    
+    // Iterate through the visible data window
+    for(let i = 0; i < 200; i++) {
+        // Calculate the absolute index of this specific slice in history
+        
+        // We work backwards from the right side of the screen
+        let relativeIndexFromNewest = (dataLen - 1) - i;
+        
+        // Prevent drawing future/undefined grid lines if array isn't full
+        if (relativeIndexFromNewest < 0 && totalSamples < 200) continue;
+
+        let absoluteId = totalSamples - (200 - 1 - i);
+
+        // Draw line if this absolute ID is a multiple of our interval
+        if (absoluteId > 0 && absoluteId % trendConfig.gridInterval === 0) {
+            let x = i * step;
+            ctx.moveTo(x, 0);
+            ctx.lineTo(x, cvs.height);
+        }
+    }
     ctx.stroke();
 
-    const drawLine = (arr, color) => {
-        ctx.strokeStyle = color; ctx.lineWidth = 1.5; ctx.beginPath();
-        let step = cvs.width / 200;
+    // --- DRAW HORIZONTAL GRID & LABELS ---
+    ctx.font = "9px 'Roboto Mono'";
+    ctx.textBaseline = "bottom";
+    
+    let hStep = cvs.height / 4;
+    
+    for(let i=0; i <= 4; i++) {
+        let y = Math.floor(cvs.height - (i * hStep));
+        if (y == cvs.height) y -= 1; 
+        
+        ctx.strokeStyle = "#333";
+        ctx.beginPath();
+        ctx.moveTo(0, y);
+        ctx.lineTo(cvs.width, y);
+        ctx.stroke();
+
+        let pct = i / 4;
+
+        // POWER (Left, Green)
+        if (trendConfig.visible.pow) {
+            let val = trendConfig.ranges.pow.min + pct * (trendConfig.ranges.pow.max - trendConfig.ranges.pow.min);
+            ctx.fillStyle = "#0f0";
+            ctx.textAlign = "left";
+            ctx.fillText(Math.round(val), 2, y - 2);
+        }
+
+        // T-AVG (Right, Red)
+        if (trendConfig.visible.tavg) {
+            let val = trendConfig.ranges.tavg.min + pct * (trendConfig.ranges.tavg.max - trendConfig.ranges.tavg.min);
+            ctx.fillStyle = "#f00";
+            ctx.textAlign = "right";
+            ctx.fillText(Math.round(val), cvs.width - 2, y - 2);
+        }
+
+        // PRESS (Right-Center, Blue)
+        if (trendConfig.visible.press) {
+            let val = trendConfig.ranges.press.min + pct * (trendConfig.ranges.press.max - trendConfig.ranges.press.min);
+            ctx.fillStyle = "#44f";
+            ctx.textAlign = "right";
+            ctx.fillText(Math.round(val), cvs.width - 28, y - 2);
+        }
+    }
+
+    // --- DRAW DATA LINES ---
+    const drawLine = (arr, color, rangeKey) => {
+        if (!trendConfig.visible[rangeKey]) return;
+        if (arr.length === 0) return;
+
+        ctx.strokeStyle = color;
+        ctx.lineWidth = 2;
+        ctx.lineJoin = "round";
+        ctx.shadowBlur = 6;
+        ctx.shadowColor = color;
+
+        ctx.beginPath();
+        let range = trendConfig.ranges[rangeKey];
+        
+        // To ensure the line stays pinned to the right when the array isn't full yet:
+        let xOffset = (200 - arr.length) * step;
+
         for(let i=0; i<arr.length; i++) {
-            let y = cvs.height - arr[i];
-            if(i==0) ctx.moveTo(0, y); else ctx.lineTo(i*step, y);
+            let val = arr[i];
+            let norm = (val - range.min) / (range.max - range.min);
+            norm = Math.max(0, Math.min(1, norm));
+            let y = cvs.height - (norm * cvs.height);
+            
+            let x = xOffset + (i * step);
+            
+            if(i===0) ctx.moveTo(x, y);
+            else ctx.lineTo(x, y);
         }
         ctx.stroke();
+        ctx.shadowBlur = 0;
     };
 
-    drawLine(trendData.pow, '#0f0');
-    drawLine(trendData.tavg, '#f00');
-    drawLine(trendData.press, '#44f');
+    drawLine(trendData.press, '#44f', 'press');
+    drawLine(trendData.tavg, '#f00', 'tavg');
+    drawLine(trendData.pow, '#0f0', 'pow');
 }
 
 document.getElementById('gov-slider').addEventListener('input', e => {
     systems.turb.gov = parseInt(e.target.value);
-    // Reset trip if at 0 and tripped
-    if(systems.turb.gov === 0 && systems.turb.tripped) {
+    // BUG FIX: Prevent resetting trip if RPM is still high (>1900)
+    if(systems.turb.gov === 0 && systems.turb.tripped && systems.turb.rpm < 1900) {
         systems.turb.tripped = false;
         alarmSystem.trigger('al-turb-trip', false);
     }
