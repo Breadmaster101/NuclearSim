@@ -839,7 +839,7 @@ const systems = {
         
         step: function() {
             if (!this.tripped) {
-                let steamTorque = systems.sg.steamFlow * 2000;
+                let steamTorque = systems.sg.steamFlow * 500;
                 let loadTorque = 0;
                 
                 if (systems.elec.breaker) loadTorque = 1800; 
