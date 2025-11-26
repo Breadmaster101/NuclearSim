@@ -49,6 +49,24 @@
         .btn-std:hover { background: #3f3f46; color: #fff; }
         .btn-std.active { background: var(--led-green); color: #000; border-color: #2f2; }
         .btn-std.proc { border-color: var(--led-amber); color: var(--led-amber); }
+        
+        /* --- NUDGE BUTTONS (NEW) --- */
+        .btn-nudge {
+            background: #27272a; 
+            border: 1px solid #52525b; 
+            color: #a1a1aa;
+            cursor: pointer; 
+            font-size: 9px; 
+            padding: 0 4px;
+            height: 16px;
+            font-family: inherit; 
+            font-weight: bold; 
+            min-width: 25px;
+            margin: 0 1px;
+        }
+        .btn-nudge:hover { background: #3f3f46; color: #fff; border-color: #888; }
+        .btn-nudge:active { background: #555; transform: translateY(1px); }
+
 
         /* --- ANNUNCIATOR --- */
         #annunciator-panel {
@@ -436,11 +454,23 @@
                 </div>
                 <hr style="border-color: #333; margin: 8px 0;">
                 
-                <div class="meter-row">
-                    <span class="meter-label">GOVERNOR</span>
-                    <input type="range" min="0" max="100" value="0" id="gov-slider">
-                    <span class="meter-label" id="val-gov">0%</span>
+                <!-- UPDATED GOVERNOR CONTROL HTML BLOCK -->
+                <div class="meter-row" style="flex-wrap: wrap; height: auto; gap: 2px;">
+                    <div style="width: 100%; display:flex; justify-content: space-between; margin-bottom: 2px;">
+                        <span class="meter-label">GOVERNOR</span>
+                        <span class="meter-label" id="val-gov" style="font-family: 'Courier New'; font-weight: bold; color: #fff;">0.00%</span>
+                    </div>
+                    
+                    <div style="display:flex; width: 100%; align-items: center;">
+                        <button class="btn-nudge" onclick="nudgeGov(-0.5)">-0.5</button>
+                        <button class="btn-nudge" onclick="nudgeGov(-0.1)">-0.1</button>
+                        <!-- Changed step to 0.01 for fine control -->
+                        <input type="range" min="0" max="100" step="0.01" value="0" id="gov-slider" style="flex:1; margin: 0 5px;">
+                        <button class="btn-nudge" onclick="nudgeGov(0.1)">+0.1</button>
+                        <button class="btn-nudge" onclick="nudgeGov(0.5)">+0.5</button>
+                    </div>
                 </div>
+                <!-- END UPDATED GOVERNOR CONTROL HTML BLOCK -->
 
                 <div class="meter-row">
                     <span class="meter-label">MW (REAL)</span>
@@ -994,7 +1024,9 @@ function updateUI() {
     document.getElementById('bar-vib').style.width = Math.min(100, systems.turb.vib) + "%";
     if(systems.turb.vib > 60) document.getElementById('bar-vib').style.backgroundColor = "red";
     else document.getElementById('bar-vib').style.backgroundColor = "#0f0";
-    document.getElementById('val-gov').innerText = systems.turb.gov + "%";
+    
+    // UPDATED GOV DISPLAY
+    document.getElementById('val-gov').innerText = systems.turb.gov.toFixed(2) + "%";
 
     document.getElementById('val-mw').innerText = fmt(systems.elec.mw) + " MW";
     document.getElementById('val-mvar').innerText = fmt(systems.elec.mvar) + " MVAR";
@@ -1179,14 +1211,42 @@ function drawTrendInternal() {
     drawLine(trendData.pow, '#0f0', 'pow');
 }
 
-document.getElementById('gov-slider').addEventListener('input', e => {
-    systems.turb.gov = parseInt(e.target.value);
-    // BUG FIX: Prevent resetting trip if RPM is still high (>1900)
-    if(systems.turb.gov === 0 && systems.turb.tripped && systems.turb.rpm < 1900) {
+// --- NEW GOVERNOR NUDGE LOGIC ---
+
+// Helper function for the buttons
+function nudgeGov(delta) {
+    let slider = document.getElementById('gov-slider');
+    let current = parseFloat(slider.value);
+    let newVal = current + delta;
+    
+    // Clamp between 0 and 100
+    newVal = Math.max(0, Math.min(100, newVal));
+    
+    // Update Slider UI
+    slider.value = newVal;
+    
+    // Update Physics
+    updateGovPhysics(newVal);
+}
+
+// The physics update function (consolidated logic)
+function updateGovPhysics(val) {
+    systems.turb.gov = val;
+    
+    // Reset trip logic: If gov is closed (near 0) and RPM is safe, reset trip
+    if(systems.turb.gov <= 0.05 && systems.turb.tripped && systems.turb.rpm < 1900) {
         systems.turb.tripped = false;
         alarmSystem.trigger('al-turb-trip', false);
     }
+}
+
+// ---------------------------------
+
+// Update the existing Event Listener to use parseFloat and the new function
+document.getElementById('gov-slider').addEventListener('input', e => {
+    updateGovPhysics(parseFloat(e.target.value));
 });
+
 document.getElementById('exc-slider').addEventListener('input', e => systems.elec.excitation = parseInt(e.target.value));
 
 function setSpeed(x) {
